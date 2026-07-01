@@ -168,6 +168,7 @@ def main():
     new = [p for p in posts if p["url"] and p["url"] not in seen][:MAX_NEW]
     if not new:
         print("Không có bài mới. Đã log:", len(seen))
+        notify(f"🔗 <b>Backlink bot</b> ({day})\n✅ Đã chạy — không có bài mới. Tổng backlink đã tạo: <b>{len(seen)}</b>.")
         return
 
     token = get_token()
