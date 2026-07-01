@@ -82,25 +82,32 @@ def append_rows(svc, rows):
 
 # ---------------- WordPress REST ----------------
 WP_HEADERS = {
-    # UA trình duyệt để né WAF/CDN (LiteSpeed/QUIC.cloud) chặn python-requests.
+    # Giả trình duyệt VN để né WAF/CDN (QUIC.cloud) chặn IP datacenter (giống tuantu-index-bot).
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/125.0 Safari/537.36",
-    "Accept": "application/json, text/xml, */*",
+                  "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/json,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "vi,en;q=0.9",
 }
 
+# Dấu hiệu trang "challenge" của QUIC.cloud/Cloudflare (không phải nội dung thật).
+_CHALLENGE = (b"One moment", b"Just a moment", b"challenge-platform", b"cf-browser-verification",
+              b"Checking your browser", b"Attention Required")
 
-def _fetch(url, params=None, tries=3):
-    """GET có retry + UA trình duyệt. Trả Response 200 hoặc None."""
+
+def _fetch(url, params=None, tries=5):
+    """GET có retry backoff tăng dần + phát hiện trang challenge WAF. Trả Response 200 (nội dung thật) hoặc None."""
     last = ""
     for i in range(tries):
         try:
             r = requests.get(url, params=params, headers=WP_HEADERS, timeout=30)
-            if r.status_code == 200:
+            head = r.content[:800]
+            is_challenge = any(m in head for m in _CHALLENGE)
+            if r.status_code == 200 and not is_challenge:
                 return r
-            last = f"HTTP {r.status_code}"
+            last = f"HTTP {r.status_code}" + (" (WAF challenge)" if is_challenge else "")
         except Exception as e:
-            last = str(e)
-        time.sleep(3)
+            last = type(e).__name__
+        time.sleep(3 * (i + 1))   # 3s, 6s, 9s, 12s, 15s — chờ qua cửa sổ bị chặn
     print(f"  [fetch fail] {url} -> {last}")
     return None
 
