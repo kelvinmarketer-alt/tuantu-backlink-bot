@@ -21,6 +21,7 @@ ENV (đặt ở GitHub Secrets):
   TELEGRAM_CHAT_ID   = ...                       (tuỳ chọn)
 """
 import os, re, json, html, time, datetime
+import xml.etree.ElementTree as ET
 import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -81,27 +82,81 @@ def append_rows(svc, rows):
 
 # ---------------- WordPress REST ----------------
 WP_HEADERS = {
-    # UA trình duyệt để né WAF/CDN (LiteSpeed/QUIC.cloud) chặn python-requests → 415.
+    # UA trình duyệt để né WAF/CDN (LiteSpeed/QUIC.cloud) chặn python-requests.
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/125.0 Safari/537.36",
-    "Accept": "application/json",
+    "Accept": "application/json, text/xml, */*",
 }
 
 
-def fetch_new_posts(limit=20):
-    """Lấy bài mới nhất đã đăng. Trả list dict {title, url, excerpt}."""
-    url = SITE_URL + "wp-json/wp/v2/posts"
-    r = requests.get(url, params={"per_page": limit, "orderby": "date",
-                                  "order": "desc", "_fields": "title,link,excerpt,date"},
-                     headers=WP_HEADERS, timeout=30)
-    r.raise_for_status()
+def _fetch(url, params=None, tries=3):
+    """GET có retry + UA trình duyệt. Trả Response 200 hoặc None."""
+    last = ""
+    for i in range(tries):
+        try:
+            r = requests.get(url, params=params, headers=WP_HEADERS, timeout=30)
+            if r.status_code == 200:
+                return r
+            last = f"HTTP {r.status_code}"
+        except Exception as e:
+            last = str(e)
+        time.sleep(3)
+    print(f"  [fetch fail] {url} -> {last}")
+    return None
+
+
+def _from_rest(limit):
+    r = _fetch(SITE_URL + "wp-json/wp/v2/posts",
+               {"per_page": limit, "orderby": "date", "order": "desc",
+                "_fields": "title,link,excerpt,date"})
+    if not r:
+        return None
+    try:
+        data = r.json()
+    except Exception:
+        return None
+    if not isinstance(data, list):   # WAF trả object lỗi -> coi như thất bại
+        return None
     out = []
-    for p in r.json():
-        title = html.unescape(re.sub("<[^>]+>", "", p.get("title", {}).get("rendered", ""))).strip()
-        exc = html.unescape(re.sub("<[^>]+>", " ", p.get("excerpt", {}).get("rendered", ""))).strip()
-        exc = re.sub(r"\s+", " ", exc)
-        out.append({"title": title, "url": p.get("link", "").strip(), "excerpt": exc})
-    return out
+    for p in data:
+        if not isinstance(p, dict):
+            continue
+        title = html.unescape(re.sub("<[^>]+>", "", (p.get("title") or {}).get("rendered", ""))).strip()
+        exc = html.unescape(re.sub("<[^>]+>", " ", (p.get("excerpt") or {}).get("rendered", ""))).strip()
+        out.append({"title": title, "url": (p.get("link") or "").strip(),
+                    "excerpt": re.sub(r"\s+", " ", exc)})
+    return out or None
+
+
+def _from_rss(limit):
+    """Fallback: đọc RSS feed (title/link/description) — thường được CDN cache nên IP nào cũng đọc được."""
+    r = _fetch(SITE_URL + "feed/")
+    if not r:
+        return None
+    try:
+        root = ET.fromstring(r.content)
+    except Exception:
+        return None
+    out = []
+    for item in root.iter("item"):
+        link = (item.findtext("link") or "").strip()
+        title = html.unescape((item.findtext("title") or "").strip())
+        desc = item.findtext("description") or ""
+        exc = re.sub(r"\s+", " ", html.unescape(re.sub("<[^>]+>", " ", desc))).strip()
+        if link:
+            out.append({"title": title, "url": link, "excerpt": exc})
+        if len(out) >= limit:
+            break
+    return out or None
+
+
+def fetch_new_posts(limit=20):
+    """Lấy bài mới nhất. Ưu tiên WP REST, chặn thì fallback RSS. None nếu cả 2 fail."""
+    posts = _from_rest(limit)
+    if posts is None:
+        print("  REST không dùng được → thử RSS feed")
+        posts = _from_rss(limit)
+    return posts
 
 
 # ---------------- Telegra.ph ----------------
@@ -173,6 +228,10 @@ def main():
     seen = existing_urls(svc)
 
     posts = fetch_new_posts(limit=20)
+    if posts is None:
+        print("Không lấy được danh sách bài (REST + RSS đều bị chặn).")
+        notify(f"⚠️ <b>Backlink bot</b> ({day})\nKhông lấy được danh sách bài (site chặn request). Sẽ thử lại lần chạy sau.")
+        return
     new = [p for p in posts if p["url"] and p["url"] not in seen][:MAX_NEW]
     if not new:
         print("Không có bài mới. Đã log:", len(seen))
