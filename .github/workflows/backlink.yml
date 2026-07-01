@@ -1,0 +1,31 @@
+name: Backlink Bot
+
+on:
+  schedule:
+    - cron: '30 1 * * *'      # 01:30 UTC = 08:30 giờ VN mỗi ngày (sau khi bài sáng đã đăng)
+  workflow_dispatch:           # cho phép bấm chạy tay
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run backlink bot
+        run: python backlink_bot.py
+        env:
+          SITE_URL:         ${{ secrets.SITE_URL }}
+          SHEET_ID:         ${{ secrets.SHEET_ID }}
+          SHEET_TAB:        ${{ secrets.SHEET_TAB }}
+          GCP_SA_JSON:      ${{ secrets.GCP_SA_JSON }}
+          TELEGRAPH_TOKEN:  ${{ secrets.TELEGRAPH_TOKEN }}
+          MAX_NEW:          ${{ secrets.MAX_NEW }}
+          TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
