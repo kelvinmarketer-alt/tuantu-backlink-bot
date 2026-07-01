@@ -2,7 +2,7 @@ name: Backlink Bot
 
 on:
   schedule:
-    - cron: '30 1 * * *'      # 01:30 UTC = 08:30 giờ VN mỗi ngày (sau khi bài sáng đã đăng)
+    - cron: '17 3 * * *'      # 03:17 UTC = 10:17 giờ VN — phút lẻ + giờ vắng, né kẹt cron GitHub & WAF soi IP lúc cao điểm
   workflow_dispatch:           # cho phép bấm chạy tay
 
 jobs:
