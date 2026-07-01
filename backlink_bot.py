@@ -150,12 +150,62 @@ def _from_rss(limit):
     return out or None
 
 
+def _from_sitemap(limit):
+    """Fallback cuối: post-sitemap.xml (file tĩnh, CDN cache → IP nào cũng đọc được, như bot index).
+    Lấy URL mới nhất; title/excerpt cào từ trang HTML (trang đã cache nên không bị WAF chặn)."""
+    r = _fetch(SITE_URL + "post-sitemap.xml")
+    if not r:
+        return None
+    try:
+        root = ET.fromstring(r.content)
+    except Exception:
+        return None
+    ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    items = []
+    for u in root.findall(".//s:url", ns):
+        loc = (u.findtext("s:loc", default="", namespaces=ns) or "").strip()
+        lm = (u.findtext("s:lastmod", default="", namespaces=ns) or "").strip()
+        if loc:
+            items.append((lm, loc))
+    if not items:
+        return None
+    items.sort(key=lambda x: x[0], reverse=True)   # mới nhất trước
+    out = []
+    for lm, loc in items[:limit]:
+        slug = loc.rstrip("/").split("/")[-1]
+        out.append({"title": slug.replace("-", " ").strip().title(), "url": loc, "excerpt": ""})
+    return out or None
+
+
+def enrich(post):
+    """Bù title/excerpt từ trang HTML (đã cache) nếu nguồn không có — chỉ gọi cho bài MỚI."""
+    if post.get("excerpt"):
+        return post
+    r = _fetch(post["url"])
+    if not r:
+        return post
+    h = r.text
+    m = re.search(r"<title[^>]*>(.*?)</title>", h, re.S | re.I)
+    if m:
+        t = html.unescape(re.sub(r"\s+", " ", m.group(1))).strip()
+        t = re.split(r"\s[–|]\s|\s-\s", t)[0].strip() or t     # bỏ đuôi "| Tên site"
+        if t:
+            post["title"] = t
+    d = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']', h, re.S | re.I)
+    if d:
+        post["excerpt"] = html.unescape(d.group(1)).strip()
+    return post
+
+
 def fetch_new_posts(limit=20):
-    """Lấy bài mới nhất. Ưu tiên WP REST, chặn thì fallback RSS. None nếu cả 2 fail."""
+    """Lấy bài mới nhất. REST → RSS → sitemap. None nếu tất cả fail."""
     posts = _from_rest(limit)
     if posts is None:
-        print("  REST không dùng được → thử RSS feed")
+        print("  REST bị chặn → thử RSS feed")
         posts = _from_rss(limit)
+    if posts is None:
+        print("  RSS bị chặn → thử post-sitemap.xml")
+        posts = _from_sitemap(limit)
     return posts
 
 
@@ -242,6 +292,7 @@ def main():
     rows, ok = [], 0
     for i, post in enumerate(new):
         try:
+            post = enrich(post)   # bù title/excerpt từ trang cache nếu nguồn thiếu
             tg_url = create_telegraph(token, post, i)
             rows.append([day, post["title"], post["url"], tg_url, "OK"])
             ok += 1
