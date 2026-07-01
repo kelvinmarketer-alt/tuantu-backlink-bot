@@ -80,12 +80,20 @@ def append_rows(svc, rows):
 
 
 # ---------------- WordPress REST ----------------
+WP_HEADERS = {
+    # UA trình duyệt để né WAF/CDN (LiteSpeed/QUIC.cloud) chặn python-requests → 415.
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/125.0 Safari/537.36",
+    "Accept": "application/json",
+}
+
+
 def fetch_new_posts(limit=20):
     """Lấy bài mới nhất đã đăng. Trả list dict {title, url, excerpt}."""
     url = SITE_URL + "wp-json/wp/v2/posts"
     r = requests.get(url, params={"per_page": limit, "orderby": "date",
                                   "order": "desc", "_fields": "title,link,excerpt,date"},
-                     timeout=30)
+                     headers=WP_HEADERS, timeout=30)
     r.raise_for_status()
     out = []
     for p in r.json():
