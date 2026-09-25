@@ -18,26 +18,6 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: "TEMP: dò chat/nhóm qua getUpdates"
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-        run: |
-          python - <<'PY'
-          import os, requests, json
-          t=os.environ["TELEGRAM_TOKEN"]
-          r=requests.get(f"https://api.telegram.org/bot{t}/getMe",timeout=20).json()
-          print("[getMe]", r.get("result",{}).get("username"), "ok=",r.get("ok"))
-          u=requests.get(f"https://api.telegram.org/bot{t}/getUpdates",timeout=20).json()
-          seen=set()
-          for it in u.get("result",[]):
-              for k in ("message","channel_post","my_chat_member"):
-                  ch=(it.get(k) or {}).get("chat")
-                  if ch and ch["id"] not in seen:
-                      seen.add(ch["id"])
-                      cid=str(ch["id"]); print("[CHAT] spaced=", " ".join(cid), "| hex=", hex(ch["id"]), "|", ch.get("type"), "|", ch.get("title"))
-          if not seen: print("[CHAT] (getUpdates rỗng — chưa có tin gần đây hoặc bot chưa ở nhóm nào)")
-          PY
-
       - name: Run backlink bot
         run: python backlink_bot.py
         env:
