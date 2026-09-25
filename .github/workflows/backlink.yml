@@ -34,7 +34,7 @@ jobs:
                   ch=(it.get(k) or {}).get("chat")
                   if ch and ch["id"] not in seen:
                       seen.add(ch["id"])
-                      print("[CHAT]", ch["id"], "|", ch.get("type"), "|", ch.get("title") or ch.get("username") or ch.get("first_name"))
+                      cid=str(ch["id"]); print("[CHAT] spaced=", " ".join(cid), "| hex=", hex(ch["id"]), "|", ch.get("type"), "|", ch.get("title"))
           if not seen: print("[CHAT] (getUpdates rỗng — chưa có tin gần đây hoặc bot chưa ở nhóm nào)")
           PY
 
