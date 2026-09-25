@@ -269,9 +269,10 @@ def notify(msg):
     if not (TG_TOKEN and TG_CHAT):
         return
     try:
-        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        r = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
                       data={"chat_id": TG_CHAT, "text": msg,
                             "parse_mode": "HTML", "disable_web_page_preview": "true"}, timeout=20)
+        print(f"[TG] status={r.status_code} body={r.text[:300]}")
     except Exception as e:
         print("Telegram err:", e)
 
