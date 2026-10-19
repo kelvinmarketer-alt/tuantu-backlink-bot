@@ -222,6 +222,20 @@ def tg(method, **fields):
     return r.json()
 
 
+def telegraph_urls(token):
+    """Fallback chống trùng khi mất Sheet log: gom mọi link bài gốc trong các trang Telegra.ph đã tạo."""
+    urls, offset = set(), 0
+    while True:
+        res = tg("getPageList", access_token=token, offset=offset, limit=200)
+        pages = (res.get("result") or {}).get("pages") or []
+        for pg in pages:
+            r = requests.get(f"{TG_API}/getPage/{pg['path']}", params={"return_content": "true"}, timeout=30).json()
+            urls.update(re.findall(r'"href":\s*"([^"]+)"', json.dumps((r.get("result") or {}).get("content") or [])))
+        if len(pages) < 200:
+            return urls
+        offset += 200
+
+
 def get_token():
     if TELEGRAPH_TOKEN:
         return TELEGRAPH_TOKEN
@@ -282,8 +296,17 @@ def main():
     now = datetime.datetime.utcnow() + datetime.timedelta(hours=TZ_OFFSET)
     day = now.strftime("%Y-%m-%d %H:%M")
     svc = sheets_client()
-    ensure_tab(svc)
-    seen = existing_urls(svc)
+    try:
+        ensure_tab(svc)
+        seen = existing_urls(svc)
+    except Exception as e:
+        # Sheet log bị xoá / bỏ chia sẻ → vẫn chạy, chống trùng bằng chính các trang Telegra.ph đã tạo.
+        print("[!] Không mở được Sheet log:", str(e)[:200])
+        notify(f"⚠️ <b>Backlink bot</b> ({day})\nKhông mở được Sheet log (bị xoá / bỏ chia sẻ). Bot vẫn chạy, chống trùng theo Telegra.ph — cần khôi phục Sheet để ghi log.")
+        svc = None
+        seen = telegraph_urls(get_token()) if TELEGRAPH_TOKEN else None
+        if seen is None:
+            raise
 
     posts = fetch_new_posts(limit=20)
     if posts is None:
@@ -310,7 +333,11 @@ def main():
             rows.append([day, post["title"], post["url"], "", f"LỖI: {e}"])
             print("❌", post["url"], e)
 
-    append_rows(svc, rows)
+    if svc:
+        append_rows(svc, rows)
+    else:
+        for r in rows:
+            print("LOG", " | ".join(r))
     notify(f"🔗 <b>Backlink bot</b> ({day})\nĐã tạo <b>{ok}</b> backlink Telegra.ph cho bài mới.\nLog: Sheet tab “{SHEET_TAB}”.")
     print(f"Xong. Tạo {ok}/{len(new)} backlink, ghi {len(rows)} dòng log.")
 
